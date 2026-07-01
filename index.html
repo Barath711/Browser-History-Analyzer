@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Browser History Analyzer</title>
+<!-- SQLite (sql.js) + XLSX (SheetJS) loaded from CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#1C1C1E; --bg2:#2C2C2E; --bg3:#3A3A3C; --bg4:#48484A;
+  --accent:#0A84FF; --accent2:#3395FF; --green:#30D158; --red:#FF453A;
+  --orange:#FF9F0A; --yellow:#FFD60A; --fg:#FFFFFF; --fg2:#EBEBF5;
+  --fg3:#8E8E93; --border:#3A3A3C; --card:#2C2C2E;
+}
+:root.light{
+  --bg:#F2F2F7; --bg2:#FFFFFF; --bg3:#E5E5EA; --bg4:#D1D1D6;
+  --accent:#007AFF; --accent2:#1A8AFF; --green:#34C759; --red:#FF3B30;
+  --orange:#FF9500; --yellow:#FFCC00; --fg:#000000; --fg2:#3C3C43;
+  --fg3:#6C6C70; --border:#C6C6C8; --card:#FFFFFF;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:'Segoe UI',-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
+}
+button{
+  background:var(--bg3);color:var(--fg);border:none;border-radius:10px;
+  padding:7px 16px;font-size:13px;font-weight:500;cursor:pointer;
+  font-family:inherit;transition:background .15s,color .15s;
+}
+button:hover{background:var(--accent);color:#fff}
+button:active{background:var(--bg4)}
+button:disabled{background:var(--bg2);color:var(--fg3);cursor:not-allowed}
+button.accent{background:var(--accent);color:#fff;font-weight:600}
+button.accent:hover{background:var(--accent2)}
+button.success{background:var(--green);color:#fff}
+button.success:hover{background:#2ec14e}
+button.themebtn{background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;
+  font-size:16px;min-width:36px;min-height:30px;padding:2px 8px}
+button.themebtn:hover{background:var(--accent);color:#fff}
+button.toggle.on{background:var(--accent);color:#fff}
+input[type=text]{
+  background:var(--bg2);color:var(--fg);border:1.5px solid var(--border);
+  border-radius:10px;padding:6px 10px;font-family:inherit;font-size:13px;width:100%;
+}
+input[type=text]:focus{outline:none;border-color:var(--accent)}
+.hdr{background:var(--bg2);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:14px;padding:12px 18px}
+.logo{font-size:15px;font-weight:bold;color:var(--accent)}
+.dim{color:var(--fg3)}
+.sub{color:var(--fg3);font-size:10px}
+.spacer{flex:1}
+.body{flex:1;display:flex;min-height:0}
+.sidebar{background:var(--bg2);border-right:1px solid var(--border);
+  width:290px;min-width:255px;padding:16px 14px;display:flex;flex-direction:column;
+  gap:10px;overflow-y:auto}
+.sec-title{font-size:11px;font-weight:bold;margin:2px 0}
+.lbl{font-size:9px;color:var(--fg3)}
+.sep{height:1px;background:var(--border);border:none;margin:4px 0}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.tabs{display:flex;background:var(--bg2);border-bottom:1px solid var(--border)}
+.tab{padding:10px 18px;font-size:13px;color:var(--fg3);cursor:pointer;
+  border-bottom:2px solid transparent}
+.tab.active{color:var(--accent);font-weight:600;border-bottom:2px solid var(--accent)}
+.tab:hover{color:var(--fg);background:var(--bg3)}
+.tabpanel{flex:1;display:none;flex-direction:column;min-height:0}
+.tabpanel.active{display:flex}
+.filterbar{background:var(--bg2);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:8px;padding:7px 10px}
+.filterbar input[type=text]{width:220px}
+.tablewrap{flex:1;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+thead th{position:sticky;top:0;background:var(--bg2);color:var(--fg3);
+  text-align:left;padding:6px 8px;font-weight:600;font-size:12px;
+  border-bottom:1px solid var(--border);white-space:nowrap;z-index:1}
+tbody td{padding:4px 8px;border-bottom:1px solid var(--border);
+  max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tbody tr:nth-child(even){background:var(--bg2)}
+tbody tr:hover{background:var(--accent);color:#fff}
+.footer{background:var(--bg2);border-top:1px solid var(--border);
+  padding:5px 14px;font-size:9px;color:var(--fg3)}
+.progress{height:6px;background:var(--bg3);border-radius:5px;overflow:hidden;margin-top:4px}
+.progress > div{height:100%;width:0;background:var(--accent);
+  border-radius:5px;transition:width .25s}
+.progress.indeterminate > div{width:40%;animation:slide 1.1s infinite ease-in-out}
+@keyframes slide{0%{margin-left:-40%}100%{margin-left:100%}}
+.col-green{color:var(--green)}.col-orange{color:var(--orange)}.col-red{color:var(--red)}
+.center{text-align:center}.right{text-align:right}
+.hint{font-size:8px;color:var(--fg3);line-height:1.4}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+  align-items:center;justify-content:center;z-index:10}
+.spinner{width:54px;height:54px;border:5px solid var(--bg4);
+  border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+  align-items:center;justify-content:center;z-index:20}
+.modal .box{background:var(--bg2);border:1px solid var(--border);border-radius:14px;
+  padding:22px;max-width:520px;width:90%;white-space:pre-wrap;word-break:break-word}
+.modal .box h3{margin:0 0 10px}
+.modal .box .actions{display:flex;justify-content:flex-end;margin-top:16px}
+.chk{display:flex;align-items:center;gap:8px;font-size:10px;cursor:pointer;user-select:none}
+.chk input{width:16px;height:16px;accent-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <span class="logo">🌐&nbsp;&nbsp;Browser History Analyzer</span>
+  <span class="sub">Edge / Chrome History Explorer&nbsp;·&nbsp;All timestamps in UTC</span>
+  <span class="spacer"></span>
+  <button class="themebtn" id="themeBtn" title="Toggle dark / light theme">☀️</button>
+</div>
+
+<div class="body">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sec-title">History File</div>
+    <button class="accent" id="selectBtn" style="min-height:38px">📂&nbsp;&nbsp;Select History File(s)…</button>
+    <input type="file" id="fileInput" multiple style="display:none" />
+    <div class="dim" id="filesLbl" style="font-size:9px">No files selected</div>
+
+    <hr class="sep" />
+    <div class="sec-title">Output</div>
+    <div class="lbl">Subject label (prefix, optional):</div>
+    <input type="text" id="labelInput" placeholder="CaseID / username / hostname…" />
+
+    <hr class="sep" />
+    <div class="sec-title">Options</div>
+    <label class="chk"><input type="checkbox" id="hostMatch" checked />Match downloads by hostname</label>
+    <div class="hint">Also correlates downloads to history entries by hostname, not only by exact URL.</div>
+
+    <hr class="sep" />
+    <div class="sec-title">Actions</div>
+    <button class="accent" id="previewBtn" style="min-height:40px">🔍&nbsp;&nbsp;Preview Data</button>
+    <button class="success" id="exportBtn" style="min-height:40px" disabled>📊&nbsp;&nbsp;Export to XLSX</button>
+
+    <div class="spacer"></div>
+    <div class="progress" id="progress"><div></div></div>
+    <div class="dim" id="statusLbl" style="font-size:9px">Loading SQLite engine…</div>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="tabs">
+      <div class="tab active" data-tab="hist">📋&nbsp;&nbsp;Browsing History</div>
+      <div class="tab" data-tab="dl">⬇️&nbsp;&nbsp;Downloads</div>
+    </div>
+
+    <!-- History tab -->
+    <div class="tabpanel active" id="panel-hist">
+      <div class="filterbar">
+        <span class="dim" id="histCount" style="font-size:9px">No data loaded&nbsp;—&nbsp;click Preview Data</span>
+        <span class="spacer"></span>
+        <span class="dim" style="font-size:9px">Filter:</span>
+        <input type="text" id="histFilter" placeholder="Search URL or title…" />
+        <button class="toggle" id="dlOnlyBtn" title="Show only history rows that have associated downloads">⬇️ Downloads Only</button>
+      </div>
+      <div class="tablewrap">
+        <table id="histTable">
+          <thead><tr>
+            <th>UTC Time</th><th>URL</th><th>Title</th><th>Downloaded</th><th>Downloaded Files</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Downloads tab -->
+    <div class="tabpanel" id="panel-dl">
+      <div class="filterbar">
+        <span class="dim" id="dlCount" style="font-size:9px">No data loaded</span>
+        <span class="spacer"></span>
+        <span class="dim" style="font-size:9px">Filter:</span>
+        <input type="text" id="dlFilter" placeholder="Search file name or URL…" />
+      </div>
+      <div class="tablewrap">
+        <table id="dlTable">
+          <thead><tr>
+            <th>ID</th><th>File Name</th><th>Start Time (UTC)</th><th>End Time (UTC)</th>
+            <th>State</th><th>Size</th><th>Source URL</th><th>Final URL</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Browser History Analyzer&nbsp;·&nbsp;All times shown in UTC&nbsp;·&nbsp;v2.0 (HTML edition)&nbsp;·&nbsp;Runs entirely in your browser — no data leaves your machine</div>
+
+<div id="overlay"><div class="spinner"></div></div>
+<div class="modal" id="modal"><div class="box">
+  <h3 id="modalTitle">Title</h3>
+  <div id="modalBody"></div>
+  <div class="actions"><button class="accent" id="modalOk">OK</button></div>
+</div></div>
+
+<script>
+"use strict";
+// ─── Constants ───────────────────────────────────────────────────────────────
+const WEBKIT_EPOCH_MS = Date.UTC(1601, 0, 1);   // 1601-01-01 UTC in JS ms
+const PREVIEW_LIMIT   = 5000;
+const DL_STATE = {0:"In Progress",1:"Complete",2:"Cancelled",3:"Interrupted",4:"Interrupted"};
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let SQL = null;                 // sql.js module
+let selectedFiles = [];         // File[]
+let loadedDatasets = [];        // [{name, data}]  (one per file)
+let activeData = null;          // first dataset's data shown in preview
+let allHist = [];               // current preview rows (history)
+let allDl   = [];               // current preview rows (downloads)
+let isDark  = true;
+
+// ─── DOM ─────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const overlay = $("overlay");
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function webkitToUtc(tsMicro){
+  if(tsMicro === null || tsMicro === undefined) return "";
+  let val;
+  try { val = Number(tsMicro); } catch { return ""; }
+  if(!isFinite(val) || val <= 0) return "";
+  const ms = WEBKIT_EPOCH_MS + val/1000;
+  const d  = new Date(ms);
+  if(isNaN(d.getTime())) return "";
+  const p = n => String(n).padStart(2,"0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())}  `+
+         `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}  UTC`;
+}
+
+function hostOf(url){
+  try { return new URL(url).hostname.toLowerCase(); }
+  catch { return ""; }
+}
+
+function baseName(p){
+  if(!p) return "";
+  const s = String(p).trim();
+  if(!s) return "";
+  const parts = s.split(/[\\/]/);
+  return parts[parts.length-1] || "";
+}
+
+function firstNonEmpty(row, colIdx, names){
+  for(const n of names){
+    if(n in colIdx){
+      const v = row[colIdx[n]];
+      if(v !== null && v !== undefined && String(v).trim() !== "") return String(v).trim();
+    }
+  }
+  return "";
+}
+
+function fmtSize(tb){
+  let n = Number(tb);
+  if(!isFinite(n) || n <= 0) return "";
+  if(n >= 1073741824) return (n/1073741824).toFixed(1)+" GB";
+  if(n >= 1048576)    return (n/1048576).toFixed(1)+" MB";
+  if(n >= 1024)       return (n/1024).toFixed(1)+" KB";
+  return n+" B";
+}
+
+function tableExists(db, name){
+  const r = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [name]);
+  return r.length > 0 && r[0].values.length > 0;
+}
+
+function tableColumns(db, name){
+  if(!tableExists(db, name)) return [];
+  const r = db.exec(`PRAGMA table_info(${name})`);
+  if(!r.length) return [];
+  return r[0].values.map(v => v[1]);
+}
+
+// ─── Core: load + correlate (mirrors Python load_data) ───────────────────────
+function loadData(uint8arr, useHostMatch){
+  const result = {history:[], downloads:[], error:null, hist_count:0, dl_count:0};
+  let db = null;
+  try{
+    db = new SQL.Database(uint8arr);
+
+    const usefulDl = ["id","tab_url","site_url","referrer","url",
+      "target_path","current_path","suggested_path","full_path",
+      "start_time","end_time","bytes_received","total_bytes","state","opened"];
+    const dlCols = tableColumns(db, "downloads");
+    let selectDl = usefulDl.filter(c => dlCols.includes(c));
+    if(!selectDl.includes("id") && dlCols.length) selectDl.unshift("id");
+
+    const exactUrlToFiles = new Map();  // url -> Set(files)
+    const hostToFiles     = new Map();  // host -> Set(files)
+    const downloadsRows   = [];
+
+    if(selectDl.length){
+      const res = db.exec(`SELECT ${selectDl.join(", ")} FROM downloads`);
+      const cols = res.length ? res[0].columns : [];
+      const rows = res.length ? res[0].values : [];
+      const ci = {}; cols.forEach((c,i)=>ci[c]=i);
+
+      // URL chains
+      const finalUrlMap = new Map();   // id -> final url
+      const chainMap    = new Map();   // id -> [urls]
+      if(tableExists(db, "downloads_url_chains")){
+        try{
+          const cr = db.exec("SELECT id, chain_index, url FROM downloads_url_chains ORDER BY id, chain_index");
+          if(cr.length){
+            const tmp = new Map();
+            for(const [did, idx, url] of cr[0].values){
+              const k = Number(did);
+              if(!tmp.has(k)) tmp.set(k, []);
+              tmp.get(k).push([Number(idx), url ? String(url) : ""]);
+            }
+            for(const [did, lst] of tmp){
+              lst.sort((a,b)=>a[0]-b[0]);
+              const urls = lst.map(x=>x[1]).filter(Boolean);
+              chainMap.set(did, urls);
+              if(urls.length) finalUrlMap.set(did, urls[urls.length-1]);
+            }
+          }
+        }catch(e){ /* ignore */ }
+      }
+
+      for(const row of rows){
+        try{
+          const did = ("id" in ci) ? Number(row[ci["id"]]) : 0;
+          const pathVals = ["target_path","current_path","suggested_path","full_path"]
+            .filter(c=>c in ci).map(c=>row[ci[c]]);
+          let fileName = "";
+          for(const pv of pathVals){ fileName = baseName(pv); if(fileName) break; }
+          const finalUrl = finalUrlMap.get(did) || "";
+          const sourceUrl = finalUrl ||
+            firstNonEmpty(row, ci, ["tab_url","site_url","referrer","url"]);
+          const urlChain = (chainMap.get(did) || []).join(" → ");
+          const startUtc = webkitToUtc(("start_time" in ci) ? row[ci["start_time"]] : null);
+          const endUtc   = webkitToUtc(("end_time"   in ci) ? row[ci["end_time"]]   : null);
+          const rawState = ("state" in ci) ? row[ci["state"]] : null;
+          const stateStr = (rawState in DL_STATE) ? DL_STATE[rawState]
+                            : (rawState!==null && rawState!==undefined ? String(rawState) : "");
+          const sizeStr  = fmtSize(("total_bytes" in ci) ? row[ci["total_bytes"]] : 0);
+
+          downloadsRows.push({
+            id:did, file_name:fileName||"", source_url:sourceUrl||"",
+            final_url:finalUrl||"", url_chain:urlChain,
+            start_utc:startUtc, end_utc:endUtc, state:stateStr, size:sizeStr
+          });
+
+          if(sourceUrl && fileName){
+            if(!exactUrlToFiles.has(sourceUrl)) exactUrlToFiles.set(sourceUrl, new Set());
+            exactUrlToFiles.get(sourceUrl).add(fileName);
+            const host = hostOf(sourceUrl);
+            if(host){
+              if(!hostToFiles.has(host)) hostToFiles.set(host, new Set());
+              hostToFiles.get(host).add(fileName);
+            }
+          }
+        }catch(e){ /* skip row */ }
+      }
+    }
+
+    result.downloads = downloadsRows;
+    result.dl_count  = downloadsRows.length;
+
+    // History
+    const historyRows = [];
+    if(tableExists(db, "urls")){
+      const hr = db.exec("SELECT url, title, last_visit_time FROM urls ORDER BY last_visit_time DESC");
+      if(hr.length){
+        for(const [url, title, lvt] of hr[0].values){
+          const utcStr = webkitToUtc(lvt);
+          const files = new Set();
+          if(url){
+            const sUrl = String(url).trim();
+            if(exactUrlToFiles.has(sUrl)) for(const f of exactUrlToFiles.get(sUrl)) files.add(f);
+            if(useHostMatch){
+              const host = hostOf(sUrl);
+              if(host && hostToFiles.has(host)) for(const f of hostToFiles.get(host)) files.add(f);
+            }
+          }
+          const filesStr = files.size ? Array.from(files).sort().join("; ") : "";
+          historyRows.push({
+            utc_time:utcStr, url:url||"", title:title||"",
+            downloaded:!!filesStr, downloaded_files:filesStr
+          });
+        }
+      }
+    }
+    result.history    = historyRows;
+    result.hist_count = historyRows.length;
+  }catch(e){
+    result.error = e.message || String(e);
+  }finally{
+    if(db){ try{ db.close(); }catch(e){} }
+  }
+  return result;
+}
+
+// ─── Rendering ───────────────────────────────────────────────────────────────
+function esc(s){ return String(s); }
+
+function renderHistory(rows){
+  const tb = $("histTable").querySelector("tbody");
+  const frag = document.createDocumentFragment();
+  for(const r of rows){
+    const tr = document.createElement("tr");
+    const cells = [
+      [r.utc_time, ""],
+      [r.url, ""],
+      [r.title, ""],
+      [r.downloaded ? "✅  Yes" : "—", "center "+(r.downloaded?"col-green":"dim")],
+      [r.downloaded_files, ""]
+    ];
+    for(const [val, cls] of cells){
+      const td = document.createElement("td");
+      td.textContent = esc(val);
+      if(cls) td.className = cls;
+      td.title = esc(val);
+      tr.appendChild(td);
+    }
+    frag.appendChild(tr);
+  }
+  tb.replaceChildren(frag);
+}
+
+function renderDownloads(rows){
+  const tb = $("dlTable").querySelector("tbody");
+  const frag = document.createDocumentFragment();
+  for(const r of rows){
+    const tr = document.createElement("tr");
+    let stateCls = "center";
+    if(r.state === "Complete") stateCls += " col-green";
+    else if(r.state === "In Progress") stateCls += " col-orange";
+    else if(r.state === "Cancelled" || r.state === "Interrupted") stateCls += " col-red";
+    const cells = [
+      [String(r.id), ""],
+      [r.file_name, ""],
+      [r.start_utc, ""],
+      [r.end_utc, ""],
+      [r.state, stateCls],
+      [r.size, "right"],
+      [r.source_url, ""],
+      [r.final_url, ""]
+    ];
+    for(const [val, cls] of cells){
+      const td = document.createElement("td");
+      td.textContent = esc(val);
+      if(cls) td.className = cls;
+      td.title = esc(val);
+      tr.appendChild(td);
+    }
+    frag.appendChild(tr);
+  }
+  tb.replaceChildren(frag);
+}
+
+// ─── Filtering ───────────────────────────────────────────────────────────────
+function filterHistory(){
+  if(!allHist.length) return;
+  const needle = $("histFilter").value.toLowerCase();
+  const dlOnly = $("dlOnlyBtn").classList.contains("on");
+  const rows = allHist.filter(r =>
+    (!needle || r.url.toLowerCase().includes(needle) || r.title.toLowerCase().includes(needle))
+    && (!dlOnly || r.downloaded));
+  renderHistory(rows.slice(0, PREVIEW_LIMIT));
+  const dlHits = rows.reduce((a,r)=>a+(r.downloaded?1:0),0);
+  $("histCount").textContent =
+    `Showing ${rows.length.toLocaleString()} of ${allHist.length.toLocaleString()}  ·  ${dlHits.toLocaleString()} with downloads`;
+}
+
+function filterDownloads(){
+  if(!allDl.length) return;
+  const needle = $("dlFilter").value.toLowerCase();
+  const rows = allDl.filter(r =>
+    !needle || (r.file_name||"").toLowerCase().includes(needle)
+    || (r.source_url||"").toLowerCase().includes(needle)
+    || (r.final_url||"").toLowerCase().includes(needle));
+  renderDownloads(rows.slice(0, PREVIEW_LIMIT));
+  $("dlCount").textContent =
+    `Showing ${rows.length.toLocaleString()} of ${allDl.length.toLocaleString()} download records`;
+}
+
+// ─── Preview ─────────────────────────────────────────────────────────────────
+function readFileAsUint8(file){
+  return new Promise((resolve, reject)=>{
+    const fr = new FileReader();
+    fr.onload  = () => resolve(new Uint8Array(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsArrayBuffer(file);
+  });
+}
+
+async function runPreview(){
+  if(!selectedFiles.length){ showModal("No File Selected","Please select one or more History files first."); return; }
+  if(!SQL){ showModal("Engine Not Ready","The SQLite engine is still loading. Please wait a moment and try again."); return; }
+  setBusy(true);
+  $("progress").classList.add("indeterminate");
+  $("statusLbl").textContent = `Loading  ${selectedFiles[0].name} …`;
+  try{
+    loadedDatasets = [];
+    const useHost = $("hostMatch").checked;
+    for(const f of selectedFiles){
+      const bytes = await readFileAsUint8(f);
+      const data  = loadData(bytes, useHost);
+      if(data.error) throw new Error(`${f.name}: ${data.error}`);
+      loadedDatasets.push({name:f.name, file:f, data});
+    }
+    activeData = loadedDatasets[0].data;
+    allHist = activeData.history;
+    allDl   = activeData.downloads;
+
+    const histN = activeData.hist_count, dlN = activeData.dl_count;
+    const dlHits = activeData.history.reduce((a,h)=>a+(h.downloaded?1:0),0);
+    const truncH = histN > PREVIEW_LIMIT ? `  (showing first ${PREVIEW_LIMIT.toLocaleString()})` : "";
+    const truncD = dlN   > PREVIEW_LIMIT ? `  (showing first ${PREVIEW_LIMIT.toLocaleString()})` : "";
+
+    $("histCount").textContent =
+      `${histN.toLocaleString()} history records${truncH}  ·  ${dlHits.toLocaleString()} correlated with downloads`;
+    $("dlCount").textContent = `${dlN.toLocaleString()} download records${truncD}`;
+    let status = `Loaded  ·  ${histN.toLocaleString()} history  ·  ${dlN.toLocaleString()} downloads  ·  ${dlHits.toLocaleString()} correlated`;
+    if(selectedFiles.length > 1) status += `  ·  Previewing 1/${selectedFiles.length} files`;
+    $("statusLbl").textContent = status;
+
+    renderHistory(activeData.history.slice(0, PREVIEW_LIMIT));
+    renderDownloads(activeData.downloads.slice(0, PREVIEW_LIMIT));
+    $("exportBtn").disabled = false;
+  }catch(e){
+    showModal("Load Error", `Failed to load history database:\n\n${e.message || e}`);
+    $("statusLbl").textContent = `Error: ${String(e.message||e).slice(0,80)}`;
+  }finally{
+    $("progress").classList.remove("indeterminate");
+    setBusy(false);
+  }
+}
+
+// ─── Export to XLSX (mirrors Python export_xlsx) ─────────────────────────────
+// Excel caps a single cell at 32,767 characters — clamp to stay under it.
+const XLSX_CELL_MAX = 32767;
+function clampCell(v){
+  if(v === null || v === undefined) return "";
+  if(typeof v === "number") return v;
+  const s = String(v);
+  return s.length > XLSX_CELL_MAX ? s.slice(0, XLSX_CELL_MAX - 1) + "…" : s;
+}
+
+function buildWorkbook(data){
+  const histAoa = [["last_visit_time_utc","url","title","downloaded","downloaded_files"]];
+  for(const r of data.history)
+    histAoa.push([r.utc_time, r.url, r.title, r.downloaded?"Yes":"No", r.downloaded_files].map(clampCell));
+
+  const dlAoa = [["id","file_name","source_url","final_url","url_chain",
+    "start_time_utc","end_time_utc","state","size"]];
+  for(const r of data.downloads)
+    dlAoa.push([r.id, r.file_name, r.source_url, r.final_url, r.url_chain,
+      r.start_utc, r.end_utc, r.state, r.size].map(clampCell));
+
+  const wb = XLSX.utils.book_new();
+  const wsH = XLSX.utils.aoa_to_sheet(histAoa);
+  const wsD = XLSX.utils.aoa_to_sheet(dlAoa);
+  autoWidth(wsH, histAoa); autoWidth(wsD, dlAoa);
+  XLSX.utils.book_append_sheet(wb, wsH, "History");
+  XLSX.utils.book_append_sheet(wb, wsD, "Downloads");
+  return wb;
+}
+
+function autoWidth(ws, aoa){
+  const cols = [];
+  const ncol = aoa.length ? aoa[0].length : 0;
+  for(let c=0;c<ncol;c++){
+    let max = 0;
+    for(const row of aoa){
+      const v = row[c]===null||row[c]===undefined ? "" : String(row[c]);
+      if(v.length > max) max = v.length;
+    }
+    cols.push({wch: Math.min(max+2, 80)});
+  }
+  ws["!cols"] = cols;
+}
+
+function runExport(){
+  if(!loadedDatasets.length){ showModal("No Data","Run Preview first to load data."); return; }
+  try{
+    let label = $("labelInput").value.trim();
+    const saved = [];
+    loadedDatasets.forEach((ds, idx) => {
+      let prefix;
+      if(idx === 0){
+        prefix = (label || ds.name.replace(/\.[^.]+$/,"") || "history").replace(/\s+/g,"_");
+      }else{
+        prefix = (ds.name.replace(/\.[^.]+$/,"") || "history").replace(/\s+/g,"_");
+      }
+      const wb = buildWorkbook(ds.data);
+      const fname = `${prefix}_history.xlsx`;
+      XLSX.writeFile(wb, fname);
+      saved.push(`  ${fname}  (H:${ds.data.hist_count.toLocaleString()} D:${ds.data.dl_count.toLocaleString()})`);
+    });
+    const d0 = loadedDatasets[0].data;
+    $("statusLbl").textContent =
+      `Exported — ${d0.hist_count.toLocaleString()} history + ${d0.dl_count.toLocaleString()} downloads`;
+    showModal("Export Complete",
+      `Saved ${loadedDatasets.length} file(s) to your browser's Downloads folder:\n\n${saved.join("\n")}`);
+  }catch(e){
+    showModal("Export Error", `Export failed:\n\n${e.message || e}`);
+  }
+}
+
+// ─── UI plumbing ─────────────────────────────────────────────────────────────
+function setBusy(busy){
+  overlay.style.display = busy ? "flex" : "none";
+  $("previewBtn").disabled = busy;
+  $("exportBtn").disabled  = busy || !loadedDatasets.length;
+  $("selectBtn").disabled  = busy;
+}
+
+function showModal(title, body){
+  $("modalTitle").textContent = title;
+  $("modalBody").textContent = body;
+  $("modal").style.display = "flex";
+}
+
+function applyTheme(){
+  document.documentElement.classList.toggle("light", !isDark);
+  $("themeBtn").textContent = isDark ? "☀️" : "🌙";
+}
+
+// ─── Events ──────────────────────────────────────────────────────────────────
+$("themeBtn").addEventListener("click", ()=>{ isDark = !isDark; applyTheme(); });
+$("selectBtn").addEventListener("click", ()=> $("fileInput").click());
+$("fileInput").addEventListener("change", e=>{
+  selectedFiles = Array.from(e.target.files || []);
+  const n = selectedFiles.length;
+  if(n){
+    $("filesLbl").textContent = n === 1 ? selectedFiles[0].name : `${n} files selected`;
+    $("statusLbl").textContent = `${n} file(s) selected — click 🔍 Preview Data`;
+    loadedDatasets = []; activeData = null; allHist = []; allDl = [];
+    $("exportBtn").disabled = true;
+    $("histTable").querySelector("tbody").replaceChildren();
+    $("dlTable").querySelector("tbody").replaceChildren();
+    $("histCount").textContent = "No data loaded  —  click Preview Data";
+    $("dlCount").textContent = "No data loaded";
+  }
+});
+$("previewBtn").addEventListener("click", runPreview);
+$("exportBtn").addEventListener("click", runExport);
+$("histFilter").addEventListener("input", filterHistory);
+$("dlFilter").addEventListener("input", filterDownloads);
+$("dlOnlyBtn").addEventListener("click", function(){
+  this.classList.toggle("on"); filterHistory();
+});
+$("modalOk").addEventListener("click", ()=> $("modal").style.display = "none");
+document.querySelectorAll(".tab").forEach(tab=>{
+  tab.addEventListener("click", ()=>{
+    document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+    document.querySelectorAll(".tabpanel").forEach(p=>p.classList.remove("active"));
+    tab.classList.add("active");
+    $("panel-" + tab.dataset.tab).classList.add("active");
+  });
+});
+
+// ─── Init sql.js ─────────────────────────────────────────────────────────────
+applyTheme();
+(async function init(){
+  try{
+    if(typeof initSqlJs === "undefined")
+      throw new Error("sql.js failed to load (no internet connection?)");
+    SQL = await initSqlJs({
+      locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+    });
+    $("statusLbl").textContent = "Select a History file to begin";
+  }catch(e){
+    $("statusLbl").textContent = "⚠️ Engine load failed — check internet connection";
+    showModal("Engine Load Failed",
+      `Could not load the SQLite engine (sql.js).\n\nThis page needs a one-time internet connection to fetch the engine and XLSX library from a CDN.\n\nError: ${e.message || e}`);
+  }
+})();
+</script>
+</body>
+</html>
